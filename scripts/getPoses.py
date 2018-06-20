@@ -26,10 +26,14 @@ log.setLevel(logging.INFO)
 
 def wget(url, destination_file):
     with requests.get(url, stream=True) as r:
+        if r.status_code != 200:
+            return False
         with open(destination_file, 'wb') as f:
             for chunk in r.iter_content(chunk_size=1024):
                 if chunk:
                     f.write(chunk)
+        return True
+
 def tar_xf(filename, output_folder, remove_tar=False):
     try:
         tar = tarfile.open(filename)
@@ -56,21 +60,24 @@ def get_calib(base_folder, dataset):
     out_file = os.path.join(out_folder, calib_file)
     if not os.path.exists(out_file):
         url = calib_url.format(dataset=dataset)
-        wget(url, out_file)
+        return wget(url, out_file)
+    return True
 
 def get_coco_pose(base_folder, dataset, remove_tar=True):
     out_folder = get_output_folder(base_folder, dataset)
     out_file = os.path.join(out_folder, pose3d_coco_file)
     if not os.path.exists(out_file):
         url = pose3d_coco_url.format(dataset=dataset)
-        wget(url, out_file)
+        return wget(url, out_file)
+    return True
 
 def get_mpii_pose(base_folder, dataset, remove_tar=True):
     out_folder = get_output_folder(base_folder, dataset)
     out_file = os.path.join(out_folder, pose3d_mpii_file)
     if not os.path.exists(out_file):
         url = pose3d_mpii_url.format(dataset=dataset)
-        wget(url, out_file)
+        return wget(url, out_file)
+    return True
 
 def worker(q):
     while True:
@@ -102,8 +109,7 @@ output_folder='test/'
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
-targets = ['calib', 'mpii_pose']
-# targets = ['calib', 'coco_pose', 'mpii_pose']
+targets = ['calib', 'coco_pose', 'mpii_pose']
 # Download all files
 for sequence, seq_datasets in datasets.items():
     for dataset in seq_datasets:
@@ -112,26 +118,39 @@ for sequence, seq_datasets in datasets.items():
 queue.join()
 
 # Check files and extract *.tar.gz files
+report = {}
 for folder, _, files in os.walk(output_folder):
     if folder == output_folder.strip('/'):
+        continue
+    rep = []
+    dataset = os.path.basename(folder)
+    if not dataset:
         continue
     for target in targets:
         if target == 'calib':
             if calib_file not in files:
                 log.warn('{} not present'.format(os.path.join(folder, calib_file)))
+            else:
+                rep.append(target)
         elif target == 'coco_pose':
             f = os.path.join(folder, pose3d_coco_file)
             if pose3d_coco_file not in files:
                 log.warn('{} not present'.format(f))
             else:
-                log.info('Extracting {}'.format(f))
+                rep.append(target)
+                log.info('[EXTRACTING] {}'.format(f))
                 tar_xf(f, folder, remove_tar=True)
         elif target == 'mpii_pose':
             f = os.path.join(folder, pose3d_mpii_file)
             if pose3d_mpii_file not in files:
                 log.warn('{} not present'.format(f))
             else:
-                log.info('Extracting {}'.format(f))
+                rep.append(target)
+                log.info('[EXTRACTING] {}'.format(f))
                 tar_xf(f, folder, remove_tar=True)
         else:
             pass
+    report[dataset] = rep
+
+with open(os.path.join(output_folder, 'report.json'), 'w') as f:
+    json.dump(report, f, indent=2)
